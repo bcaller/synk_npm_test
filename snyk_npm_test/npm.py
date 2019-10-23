@@ -4,31 +4,8 @@ import re
 from typing import Dict, List, NamedTuple, Tuple
 
 import aiohttp
-import requests
 
-
-SPECIFIC_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-
-
-class PackageIdentifier(NamedTuple):
-    package_name: str
-    version_string: str
-
-    def __repr__(self):
-        return f"{self.package_name}@{self.version_string}"
-
-
-class Semver(NamedTuple):
-    major: int
-    minor: int
-    patch: int
-
-    @classmethod
-    def from_string(cls, version: str):
-        return Semver(*tuple(int(x) for x in SPECIFIC_RE.fullmatch(version).groups()))
-
-    def __str__(self) -> str:
-        return f"{self.major}.{self.minor}.{self.patch}"
+from .identifiers import PackageIdentifier, Semver
 
 
 class AmbiguousVersionStringError(Exception):
@@ -39,10 +16,13 @@ class AmbiguousVersionStringError(Exception):
 
 
 class NpmResolver:
+    def __init__(self, cache=None):
+        self.cache = cache
+
     async def resolve_to_specific_version(
         self, package_name: str, fuzzy_version_string: str,
     ) -> PackageIdentifier:
-        if SPECIFIC_RE.fullmatch(fuzzy_version_string):  # Simple 12.34.56
+        if Semver.is_semver(fuzzy_version_string):  # Simple 12.34.56
             return PackageIdentifier(package_name, fuzzy_version_string)
         else:
             versions, dist_tags = await self.get_package_versions(package_name)
@@ -61,9 +41,9 @@ class NpmResolver:
         semver = (
             Semver.from_string(version)
             for version in versions
-            if SPECIFIC_RE.fullmatch(version)
+            if Semver.is_semver(version)
         )
-        if fuzzy_version_string[0] in ('~', '^') and SPECIFIC_RE.fullmatch(fuzzy_version_string[1:]):
+        if fuzzy_version_string[0] in ('~', '^') and Semver.is_semver(fuzzy_version_string[1:]):
             # ^12.34.56, ^12.0.0, ^0.1.0, ^0.0.3 or ~12.34.56
             base_version = Semver.from_string(fuzzy_version_string[1:])
             if fuzzy_version_string[0] == '~' or (base_version.major == 0 and base_version.minor > 0):
@@ -82,11 +62,28 @@ class NpmResolver:
                     )
                 )
             return str(max(acceptable))
+
+        conditions = re.findall(r"([><]=?)\s*(\d+(?:\.\d+){0,2})", fuzzy_version_string)
+        if conditions:
+            semver = list(semver)
+            for (comparator, version) in conditions:
+                fixed_version = Semver.from_partial_string(version)
+                if comparator == '>':
+                    predicate = lambda x: x > fixed_version
+                elif comparator == '>=':
+                    predicate = lambda x: x >= fixed_version
+                elif comparator == '<':
+                    predicate = lambda x: x < fixed_version
+                elif comparator == '<=':
+                    predicate = lambda x: x <= fixed_version
+                semver = [s for s in semver if predicate(s)]
+            return str(max(semver))
         raise AmbiguousVersionStringError(fuzzy_version_string, (versions, dist_tags))
 
     async def recursively_get_dependencies(self, package_identifier: PackageIdentifier, results=None):
         results = {} if results is None else results
-        assert package_identifier not in results
+        if package_identifier in results:
+            return results
         results[package_identifier] = []
         dependencies = await self.get_dependencies(package_identifier)
         tasks = []
@@ -99,10 +96,15 @@ class NpmResolver:
 
 
     async def get_dependencies(self, package_identifier: PackageIdentifier):
+        if self.cache:
+            cached = self.cache.get_dependencies(package_identifier)
+            if cached:
+                return [PackageIdentifier(*d) for d in cached]
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"https://registry.npmjs.org/{package_identifier.package_name}/{package_identifier.version_string}"
             ) as registry_response:
+                registry_response.raise_for_status()
                 json_response = await registry_response.json()
                 dependencies_dict = json_response.get("dependencies", {})
                 tasks = [
@@ -110,14 +112,30 @@ class NpmResolver:
                     for name, version_string in dependencies_dict.items()
                 ]
                 results = await asyncio.gather(*tasks)
+                if self.cache:
+                    self.cache.put_dependencies(package_identifier, results)
                 return results
 
 
     async def get_package_versions(self, package_name: str) -> Tuple[List[str], Dict[str, str]]:
+        if self.cache:
+            cached = self.cache.get_versions(package_name)
+            if cached:
+                return PackageIdentifier(cached[0], cached[1])
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"https://registry.npmjs.org/{package_name}"
             ) as registry_response:
                 json_response = await registry_response.json()
                 versions_dict = json_response["versions"]
-                return list(versions_dict.keys()), json_response["dist-tags"]
+                results = list(versions_dict.keys()), json_response["dist-tags"]
+                if self.cache:
+                    self.cache.put_versions(package_name, [results[0], results[1]])
+                return results
+
+
+def to_json_tree(root, package_to_dependencies_mapping):
+    return {
+        str(package): to_json_tree(package, package_to_dependencies_mapping)
+        for package in package_to_dependencies_mapping[root]
+    }

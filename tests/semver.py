@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from app.npm import (
+from snyk_npm_test.npm import (
     PackageIdentifier,
     Semver,
     AmbiguousVersionStringError,
@@ -13,6 +13,11 @@ class TestSemver(unittest.TestCase):
     def test_semver(self):
         assert Semver.from_string("0.12354.99") == (0, 12354, 99)
         assert str(Semver(0, 12354, 99)) == "0.12354.99"
+
+    def test_semver_partial(self):
+        assert Semver.from_partial_string("0.12354.99") == (0, 12354, 99)
+        assert Semver.from_partial_string("0.12354") == (0, 12354, 0)
+        assert Semver.from_partial_string("9") == (9, 0, 0)
 
 
 class TestVersionResolution(unittest.TestCase):
@@ -45,3 +50,33 @@ class TestVersionResolution(unittest.TestCase):
         self.assertEqual(self.resolver.resolve_from_version_list(
             "^1.0.1", ["0.1.2", "0.6.3", "0.0.1", "0.0.5", "1.0.3", "1.0.1", "1.1.1", "1.9.0", "x"], {},
         ), "1.9.0", "^X.Y.Z should give X.*.*")
+
+    def test_conditions(self):
+        self.assertEqual(
+            self.resolver.resolve_from_version_list(
+                ">2 <3",
+                ["1.0.1", "2.9.9", "4.5.6"], {},
+            ),
+            "2.9.9",
+        )
+        self.assertEqual(
+            self.resolver.resolve_from_version_list(
+                ">2 >=3",
+                ["1.0.1", "2.9.9", "4.5.6"], {},
+            ),
+            "4.5.6",
+        )
+        self.assertEqual(
+            self.resolver.resolve_from_version_list(
+                "<=2.3",
+                ["1.0.1", "2.9.9"], {},
+            ),
+            "1.0.1",
+        )
+        self.assertEqual(
+            self.resolver.resolve_from_version_list(
+                "<=2.3",
+                ["1.0.1", "2.2.2", "5.5.5"], {},
+            ),
+            "2.2.2",
+        )

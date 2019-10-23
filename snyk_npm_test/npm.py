@@ -98,7 +98,7 @@ class NpmResolver:
     async def get_dependencies(self, package_identifier: PackageIdentifier):
         if self.cache:
             cached = self.cache.get_dependencies(package_identifier)
-            if cached:
+            if cached is not None:
                 return [PackageIdentifier(*d) for d in cached]
         async with aiohttp.ClientSession() as session:
             async with session.get(

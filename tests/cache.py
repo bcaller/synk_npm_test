@@ -1,10 +1,9 @@
 import asyncio
+import json
 import unittest
 
 from snyk_npm_test.npm import (
     PackageIdentifier,
-    Semver,
-    AmbiguousVersionStringError,
     NpmResolver,
 )
 from snyk_npm_test.cache import Cache
@@ -27,7 +26,7 @@ class DictCache(Cache):
         self.mc = DictMemcache()
 
 
-class TestVersionResolution(unittest.TestCase):
+class TestNpmResolutionWithCache(unittest.TestCase):
     def setUp(self):
         self.resolver = NpmResolver(
             DictCache()
@@ -49,3 +48,13 @@ class TestVersionResolution(unittest.TestCase):
         ) == PackageIdentifier(
             "abc", "4.5.7",
         )
+
+    def test_full_resolution_using_cache(self):
+        with open("tests/example-cache.json") as c:
+            self.resolver.cache.mc._dict = json.loads(c.read())
+        dependencies = asyncio.run(
+            self.resolver.recursively_get_dependencies(
+                PackageIdentifier("socket.io", "2.3.0")
+            )
+        )
+        assert PackageIdentifier("this-is-a-fake-package!!!-ssl", "1.5.5") in dependencies

@@ -2,7 +2,7 @@ import json
 
 import memcache
 
-from .identifiers import PackageIdentifier
+from snyk_npm_test.identifiers import PackageIdentifier
 
 
 class Cache:

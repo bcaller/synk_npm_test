@@ -5,7 +5,7 @@ from typing import Dict, List, NamedTuple, Tuple
 
 import aiohttp
 
-from .identifiers import PackageIdentifier, Semver
+from snyk_npm_test.identifiers import PackageIdentifier, Semver
 
 
 class AmbiguousVersionStringError(Exception):

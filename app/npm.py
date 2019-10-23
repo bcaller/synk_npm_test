@@ -12,6 +12,9 @@ class PackageIdentifier(NamedTuple):
     package_name: str
     version_string: str
 
+    def __repr__(self):
+        return f"{self.package_name}@{self.version_string}"
+
 
 class Semver(NamedTuple):
     major: int
@@ -40,14 +43,13 @@ def resolve_to_specific_version(package_name: str, fuzzy_version_string: str) ->
         versions, dist_tags = get_package_versions(package_name)
         return PackageIdentifier(
             package_name,
-            resolve_from_version_list(package_name, fuzzy_version_string, versions, dist_tags),
+            resolve_from_version_list(fuzzy_version_string, versions, dist_tags),
         )
 
 
 def resolve_from_version_list(
     fuzzy_version_string: str, versions: List[str], dist_tags: Dict[str, str],
 ) -> str:
-    print(versions, dist_tags)
     if fuzzy_version_string in dist_tags:  # e.g. next
         return dist_tags[fuzzy_version_string]
     if fuzzy_version_string in versions:  # e.g. 2.1.3rc7x
@@ -80,15 +82,26 @@ def resolve_from_version_list(
 
 
 def get_dependencies(package_identifier: PackageIdentifier):
+    print("Getting deps for", package_identifier)
     registry_response = requests.get(
         f"https://registry.npmjs.org/{package_identifier.package_name}/{package_identifier.version_string}",
     )
     registry_response.raise_for_status()
-    dependencies_dict = registry_response.json()["dependencies"]
+    dependencies_dict = registry_response.json().get("dependencies", {})
     return [
         resolve_to_specific_version(name, version_string)
         for name, version_string in dependencies_dict.items()
     ]
+
+
+def recursively_get_dependencies(package_identifier: PackageIdentifier, results=None):
+    results = {} if results is None else results
+    results[package_identifier] = []
+    for dependency in get_dependencies(package_identifier):
+        results[package_identifier].append(dependency)
+        if dependency not in results:
+            recursively_get_dependencies(dependency, results)
+    return results
 
 
 def get_package_versions(package_name: str) -> Tuple[List[str], Dict[str, str]]:

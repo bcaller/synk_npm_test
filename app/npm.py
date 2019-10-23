@@ -1,7 +1,9 @@
+import asyncio
 import re
 
 from typing import Dict, List, NamedTuple, Tuple
 
+import aiohttp
 import requests
 
 
@@ -36,11 +38,11 @@ class AmbiguousVersionStringError(Exception):
         self.version_data = version_data
 
 
-def resolve_to_specific_version(package_name: str, fuzzy_version_string: str) -> PackageIdentifier:
+async def resolve_to_specific_version(package_name: str, fuzzy_version_string: str) -> PackageIdentifier:
     if SPECIFIC_RE.fullmatch(fuzzy_version_string):  # Simple 12.34.56
         return PackageIdentifier(package_name, fuzzy_version_string)
     else:
-        versions, dist_tags = get_package_versions(package_name)
+        versions, dist_tags = await get_package_versions(package_name)
         return PackageIdentifier(
             package_name,
             resolve_from_version_list(fuzzy_version_string, versions, dist_tags),
@@ -81,32 +83,40 @@ def resolve_from_version_list(
     raise AmbiguousVersionStringError(fuzzy_version_string, (versions, dist_tags))
 
 
-def get_dependencies(package_identifier: PackageIdentifier):
-    print("Getting deps for", package_identifier)
-    registry_response = requests.get(
-        f"https://registry.npmjs.org/{package_identifier.package_name}/{package_identifier.version_string}",
-    )
-    registry_response.raise_for_status()
-    dependencies_dict = registry_response.json().get("dependencies", {})
-    return [
-        resolve_to_specific_version(name, version_string)
-        for name, version_string in dependencies_dict.items()
-    ]
-
-
-def recursively_get_dependencies(package_identifier: PackageIdentifier, results=None):
+async def recursively_get_dependencies(package_identifier: PackageIdentifier, results=None):
     results = {} if results is None else results
+    assert package_identifier not in results
     results[package_identifier] = []
-    for dependency in get_dependencies(package_identifier):
+    dependencies = await get_dependencies(package_identifier)
+    tasks = []
+    for dependency in dependencies:
         results[package_identifier].append(dependency)
         if dependency not in results:
-            recursively_get_dependencies(dependency, results)
+            tasks.append(recursively_get_dependencies(dependency, results))
+    await asyncio.gather(*tasks)
     return results
 
 
-def get_package_versions(package_name: str) -> Tuple[List[str], Dict[str, str]]:
-    registry_response = requests.get(
-        f"https://registry.npmjs.org/{package_name}",
-    ).json()
-    versions_dict = registry_response["versions"]
-    return list(versions_dict.keys()), registry_response["dist-tags"]
+async def get_dependencies(package_identifier: PackageIdentifier):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"https://registry.npmjs.org/{package_identifier.package_name}/{package_identifier.version_string}"
+        ) as registry_response:
+            json_response = await registry_response.json()
+            dependencies_dict = json_response.get("dependencies", {})
+            tasks = [
+                resolve_to_specific_version(name, version_string)
+                for name, version_string in dependencies_dict.items()
+            ]
+            results = await asyncio.gather(*tasks)
+            return results
+
+
+async def get_package_versions(package_name: str) -> Tuple[List[str], Dict[str, str]]:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"https://registry.npmjs.org/{package_name}"
+        ) as registry_response:
+            json_response = await registry_response.json()
+            versions_dict = json_response["versions"]
+            return list(versions_dict.keys()), json_response["dist-tags"]

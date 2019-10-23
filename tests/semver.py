@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 
 from app.npm import (
@@ -17,7 +18,7 @@ class TestSemver(unittest.TestCase):
 
 class TestVersionResolution(unittest.TestCase):
     def test_specific_version(self):
-        assert resolve_to_specific_version("!", "0.2.3") == PackageIdentifier(
+        assert asyncio.run(resolve_to_specific_version("!", "0.2.3")) == PackageIdentifier(
             "!", "0.2.3",
         )
 

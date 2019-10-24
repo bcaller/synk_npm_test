@@ -35,7 +35,7 @@ class Semver(NamedTuple):
 
     @classmethod
     def from_partial_string(cls, version: str):
-        parts = [int(x) for x in version.split('.')]
+        parts = [int(x) for x in version.split(".")]
         n = len(parts)
         if n == 0 or n > 3:
             raise ValueError("Impossible")
@@ -48,4 +48,3 @@ class Semver(NamedTuple):
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}.{self.patch}"
-

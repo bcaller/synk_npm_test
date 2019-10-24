@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  api:
+    build: .
+    restart: always
+    ports:
+      - "5000:8000"
+    environment:
+      - MEMCACHED=cache:11211
+    volumes:
+      - .data/CTFd/logs:/var/log/CTFd
+      - .data/CTFd/uploads:/var/uploads
+      - .:/opt/CTFd:ro
+    networks:
+        default:
+        internal:
+
+  cache:
+    image: memcached
+    restart: always
+    networks:
+        internal:
+
+networks:
+    default:
+    internal:
+        internal: true
